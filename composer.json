@@ -1,0 +1,45 @@
+{
+    "name": "phpinnacle/nsq",
+    "type": "library",
+    "description": "PHPinnacle async NSQ client implementation",
+    "keywords": [
+        "phpinnacle", "async", "amphp", "nsq"
+    ],
+    "homepage": "https://github.com/phpinnacle/amridge",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "PHPinnacle",
+            "email": "dev@phpinnacle.com",
+            "homepage": "https://phpinnacle.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.0",
+        "ext-json": "*",
+        "amphp/socket": "^1.1",
+        "phpinnacle/buffer": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "PHPinnacle\\NSQ\\": "src"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PHPinnacle\\NSQ\\Tests\\": "tests"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "1.0-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
