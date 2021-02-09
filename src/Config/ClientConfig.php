@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
-namespace PHPinnacle\NSQ;
+namespace PHPinnacle\NSQ\Config;
 
-final class Config
+use PHPinnacle\NSQ\Exception;
+
+final class ClientConfig
 {
     public function __construct(
         public ?string $authSecret = null,
@@ -25,11 +27,11 @@ final class Config
         $this->featureNegotiation = true;
 
         if ('' === $this->hostname) {
-            $this->hostname = (static fn (mixed $h): string => \is_string($h) ? $h : '')(gethostname());
+            $this->hostname = \gethostname() ?: '';
         }
 
         if ($this->snappy && $this->deflate) {
-            throw new \InvalidArgumentException('Client cannot enable both [snappy] and [deflate]');
+            throw new Exception\ClientException('Client cannot enable both [snappy] and [deflate]');
         }
     }
 

@@ -1,35 +1,28 @@
 <?php
-/**
- * This file is part of PHPinnacle/Amridge.
- *
- * (c) PHPinnacle Team <dev@phpinnacle.com>
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
 
 declare(strict_types = 1);
 
 namespace PHPinnacle\NSQ;
 
 use Amp\Deferred;
-use Amp\Socket\ConnectContext;
-use Amp\Loop;
 use Amp\Promise;
-use function Amp\asyncCall, Amp\call, Amp\Socket\connect;
+use Generator;
+use function Amp\asyncCall, Amp\call;
 
 final class Connection
 {
+    private $writeBuffer;
+    private $readBuffer;
     private $parser;
-    private $buffer;
-    private $socket;
-    private $callbacks = [];
-    private $lastWrite = 0;
+    private $stream;
+    private $deferreds = [];
+    private $handlers = [];
 
     public function __construct(private string $uri)
     {
-        $this->parser = new Parser(new Buffer());
-        $this->buffer = new Buffer;
+        $this->writeBuffer = new Buffer();
+        $this->readBuffer  = new Buffer();
+        $this->parser      = new Parser();
     }
 
     public function __destruct()
@@ -37,70 +30,109 @@ final class Connection
         $this->close();
     }
 
-    public function connect(int $timeout = 0, int $maxAttempts = 0, bool $noDelay = false): Promise
+    public function connect(): Promise
     {
-        return call(function () use ($timeout, $maxAttempts, $noDelay) {
-            $context = new ConnectContext();
-
-            if ($maxAttempts > 0) {
-                $context = $context->withMaxAttempts($maxAttempts);
-            }
-
-            if ($timeout > 0) {
-                $context = $context->withConnectTimeout($timeout);
-            }
-
-            if ($noDelay) {
-                $context = $context->withTcpNoDelay();
-            }
-
-            $this->socket = yield connect($this->uri, $context);
+        return call(function () {
+            $this->stream = yield Stream\SocketStream::connect($this->uri);
 
             asyncCall(function () {
-                while (null !== $chunk = yield $this->socket->read()) {
-                    $this->parser->append($chunk);
+                while (null !== $chunk = yield $this->stream->read()) {
+                    $this->readBuffer->append($chunk);
 
-                    while ($response = $this->parser->parse()) {
-                        foreach ($this->callbacks ?? [] as $i => $callback) {
-                            asyncCall($callback, $response);
+                    while ($response = $this->parser->parse($this->readBuffer)) {
+                        yield from $this->handle($response);
+                    }
 
-                            unset($this->callbacks[$i]);
-                        }
+                    if ($this->stream === null) {
+                        break;
                     }
                 }
-
-                $this->close();
             });
         });
     }
 
-    public function command(Command $frame): Promise
+    public function command(string $name, array|string $params = [], string $data = null): Promise
     {
-        $this->lastWrite = Loop::now(); // TODO: heartbeats
+        $command = $params ? implode(' ', [$name, ...((array) $params)]) : $name;
 
-        return $this->socket->write($frame->pack($this->buffer));
+        $this->writeBuffer->append($command.PHP_EOL);
+
+        if ($data !== null) {
+            $this->writeBuffer->appendUint32(\strlen($data));
+            $this->writeBuffer->append($data);
+        }
+
+        return $this->stream->write($this->writeBuffer->flush());
     }
 
     public function response(): Promise
     {
-        $deferred = new Deferred;
-
-        $this->callbacks[] = function (Response $response) use ($deferred) {
-            $deferred->resolve($response);
-        };
+        $this->deferreds[] = $deferred = new Deferred;
 
         return $deferred->promise();
     }
 
-    /**
-     * @return void
-     */
+    public function listen(callable $handler): void
+    {
+        $this->handlers[] = $handler;
+    }
+
+    public function useSnappy(): Promise
+    {
+        $this->stream = new Stream\SnappyStream($this->stream);
+
+        return $this->response();
+    }
+
+    public function useDeflate(): Promise
+    {
+        $this->stream = new Stream\SnappyStream($this->stream);
+
+        return $this->response();
+    }
+
     public function close(): void
     {
-        $this->callbacks = [];
+        $this->deferreds = [];
 
-        if ($this->socket !== null) {
-            $this->socket->close();
+        if ($this->stream !== null) {
+            $this->stream->close();
+
+            $this->stream = null;
+        }
+    }
+
+    private function handle(Frame $frame): Generator
+    {
+        switch (true) {
+            case $frame instanceof Frame\Response:
+                if ($frame->heartbeat()) {
+                    yield $this->command(Commands::NOP);
+
+                    return;
+                }
+
+                foreach ($this->deferreds ?? [] as $i => $deferred) {
+                    unset($this->deferreds[$i]);
+
+                    $deferred->resolve($frame);
+                }
+
+                break;
+            case $frame instanceof Frame\Error:
+                foreach ($this->deferreds ?? [] as $i => $deferred) {
+                    unset($this->deferreds[$i]);
+
+                    $deferred->fail($frame->toException());
+                }
+
+                break;
+            case $frame instanceof Frame\Message:
+                foreach ($this->handlers as $handler) {
+                    asyncCall($handler, $frame);
+                }
+
+                break;
         }
     }
 }

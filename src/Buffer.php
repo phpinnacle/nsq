@@ -1,12 +1,4 @@
 <?php
-/**
- * This file is part of PHPinnacle/Amridge.
- *
- * (c) PHPinnacle Team <dev@phpinnacle.com>
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
 
 declare(strict_types = 1);
 
@@ -18,6 +10,26 @@ final class Buffer extends ByteBuffer
 {
     public function readUInt32LE(): int
     {
-        return \unpack("V", $this->consume(4))[1];
+        return \unpack("V", $this->read(4))[1];
+    }
+
+    public function consumeData($size): string
+    {
+        return $size > 4 ? $this->consume($size - 4) : '';
+    }
+
+    public function consumeTimestamp(): int
+    {
+        return $this->consumeUInt64();
+    }
+
+    public function consumeAttempts(): int
+    {
+        return $this->consumeUInt16();
+    }
+
+    public function consumeMessageID(): string
+    {
+        return $this->consume(16);
     }
 }

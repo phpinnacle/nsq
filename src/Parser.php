@@ -1,43 +1,43 @@
 <?php
-/**
- * This file is part of PHPinnacle/Amridge.
- *
- * (c) PHPinnacle Team <dev@phpinnacle.com>
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
 
 declare(strict_types = 1);
 
 namespace PHPinnacle\NSQ;
 
-final class Parser
+class Parser
 {
-    public function __construct(private Buffer $buffer) {}
+    private const SIZE = 4;
+    private const MESSAGE_HEADER_SIZE =
+        8 +  // timestamp
+        2 +  // attempts
+        16 + // ID
+        4;   // Frame type
 
-    public function append(string $chunk): void
+    public function parse(Buffer $buffer): ?Frame
     {
-        $this->buffer->append($chunk);
-    }
-
-    public function parse(): ?Response
-    {
-        if ($this->buffer->size() < 4) {
+        if ($buffer->size() < self::SIZE) {
             return null;
         }
 
-        $size  = $this->buffer->readInt32();
+        $size = $buffer->readInt32();
 
-        if ($this->buffer->size() < $size) {
+        if ($buffer->size() < $size) {
             return null;
         }
 
-        $this->buffer->discard(4);
+        $buffer->discard(self::SIZE);
 
-        $type  = $this->buffer->consumeInt32();
-        $data  = $size > 4 ? $this->buffer->consume($size - 4) : '';
+        $type = $buffer->consumeInt32();
 
-        return new Response($type, $size, $data);
+        return match($type) {
+            Frame::TYPE_RESPONSE => new Frame\Response($buffer->consumeData($size)),
+            Frame::TYPE_ERROR => new Frame\Error($buffer->consumeData($size)),
+            Frame::TYPE_MESSAGE => new Frame\Message(
+                timestamp: $buffer->consumeTimestamp(),
+                attempts: $buffer->consumeAttempts(),
+                id: $buffer->consumeMessageID(),
+                body: $buffer->consume($size - self::MESSAGE_HEADER_SIZE),
+            ),
+        };
     }
 }
